@@ -34,7 +34,6 @@ Advanced (Direct) Settings:
 #include "Example_get_apr.h"
 
 
-
 int main(int argc, char **argv) {
 
     //input parsing
@@ -118,50 +117,36 @@ int main(int argc, char **argv) {
         std::cout << "Lossy Compression Ratio: " << original_pixel_image_size/apr_file_size << std::endl;
         std::cout << std::endl;
 
-        if(options.store_delta){
-            //feel free to change
-            unsigned int blosc_comp_type = BLOSC_ZSTD;
-            unsigned int blosc_comp_level = options.compress_level;
-            unsigned int blosc_shuffle = 1;
+        apr.write_apr_paraview(options.directory,file_name,apr.particles_intensities);
+        std::cout << "Written the combination of h5 and xmf file that can be read by Paraview, load the xmf file in Paraview and select Xdmf Reader" << std::endl;
 
-            PixelData<uint16_t> recon_image;
+        TiffUtils::TiffInfo inputTiff(options.directory + options.input_rab5);
+        PixelData<uint16_t> imageRab5 = TiffUtils::getMesh<uint16_t>(inputTiff);
 
-            apr.interp_img(recon_image, apr.particles_intensities);
+        ExtraParticleData<float> rab5_parts(apr);
+        apr.get_parts_from_img(imageRab5,rab5_parts);
 
-            TiffUtils::TiffInfo inputTiff(options.directory + options.input);
-            PixelData<uint16_t> inputImage = TiffUtils::getMesh<uint16_t>(inputTiff);
+        std::vector<PixelData<uint16_t>> downsampled_img;
+        //Down-sample the image for particle intensity estimation
+        downsamplePyrmaid(imageRab5, downsampled_img, apr.level_max(), apr.level_min());
 
-            PixelData<int16_t> diff_image(inputImage.y_num,inputImage.x_num,inputImage.z_num,0);
+        ExtraParticleData<float> rab5_parts_ds(apr);
+        apr.get_parts_from_img(downsampled_img,rab5_parts_ds);
 
-#ifdef HAVE_OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-            for (int i = 0; i < inputImage.mesh.size(); ++i) {
+        apr.write_apr_paraview(options.directory,file_name + "rab5",rab5_parts);
 
-                diff_image.mesh[i] = 2 * abs(recon_image.mesh[i] - inputImage.mesh[i]) +
-                                         ((recon_image.mesh[i] - inputImage.mesh[i]) > 0);
-            }
+        apr.write_apr_paraview(options.directory,file_name + "rab5_ds",rab5_parts_ds);
 
-            std::cout << "Storing diff image for lossless reconstruction" << std::endl;
-            APRWriter aprWriter;
-            float file_size = aprWriter.write_mesh_to_hdf5(diff_image,save_loc,file_name,blosc_comp_type,blosc_comp_level,blosc_shuffle);
-            std::cout << "Size of the image diff: " << file_size << " MB" << std::endl;
+        PixelData<uint16_t> recon_pc_rab5;
 
-            std::cout << std::endl;
-            std::cout << "Lossless Compression Ratio (APR + diff): " << original_pixel_image_size/(file_size + apr_file_size) << std::endl;
-            std::cout << std::endl;
+        //perform piece-wise constant interpolation
+        apr.interp_img(recon_pc_rab5, rab5_parts_ds);
 
-            float file_size_org = aprWriter.write_mesh_to_hdf5(inputImage,save_loc,file_name,blosc_comp_type,blosc_comp_level,blosc_shuffle);
-            std::cout << "Size of the pixel image compressed: " << file_size_org << " MB" << std::endl;
-
-            std::cout << std::endl;
-            std::cout << "Lossless Compression Ratio (Pixel Image): " << original_pixel_image_size/(file_size_org) << std::endl;
-            std::cout << std::endl;
-
-        }
+        //write output as tiff
+        TiffUtils::saveMeshAsTiff(options.directory + apr.name + "rab_5_pc.tif", recon_pc_rab5);
 
 
-        } else {
+    } else {
         std::cout << "Oops, something went wrong. APR not computed :(." << std::endl;
     }
 
@@ -201,6 +186,14 @@ cmdLineOptions read_command_line_options(int argc, char **argv){
         result.input = std::string(get_command_option(argv, argv + argc, "-i"));
     } else {
         std::cout << "Input file required" << std::endl;
+        exit(2);
+    }
+
+    if(command_option_exists(argv, argv + argc, "-i_rab5"))
+    {
+        result.input_rab5 = std::string(get_command_option(argv, argv + argc, "-i_rab5"));
+    } else {
+        std::cout << "Rab5 Input file required" << std::endl;
         exit(2);
     }
 

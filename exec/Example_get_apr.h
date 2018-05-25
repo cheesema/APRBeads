@@ -17,6 +17,7 @@ struct cmdLineOptions{
     std::string stats = "";
     std::string directory = "";
     std::string input = "";
+    std::string input_rab5 = "";
     std::string mask_file = "";
     bool stats_file = false;
     bool normalize_input = false;
